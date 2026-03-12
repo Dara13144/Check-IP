@@ -1,0 +1,441 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Smartphone, 
+  Cpu, 
+  HardDrive, 
+  MemoryStick, 
+  Wifi,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  RefreshCw,
+  Gamepad2,
+  Battery,
+  Thermometer
+} from 'lucide-react';
+
+interface SystemRequirement {
+  name: string;
+  minRequired: string;
+  recommended: string;
+  current: string;
+  status: 'checking' | 'passed' | 'warning' | 'failed';
+  icon: React.ReactNode;
+}
+
+interface DeviceInfo {
+  userAgent: string;
+  platform: string;
+  language: string;
+  cookiesEnabled: boolean;
+  doNotTrack: string | null;
+  hardwareConcurrency: number;
+  deviceMemory: number;
+  maxTouchPoints: number;
+  screenWidth: number;
+  screenHeight: number;
+  colorDepth: number;
+  pixelDepth: number;
+  connectionType?: string;
+  downlink?: number;
+  rtt?: number;
+  saveData?: boolean;
+}
+
+const FreeFireSystemCheck: React.FC = () => {
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo | null>(null);
+  const [requirements, setRequirements] = useState<SystemRequirement[]>([
+    {
+      name: 'Operating System',
+      minRequired: 'Android 4.0.3+ / iOS 9.0+',
+      recommended: 'Android 10+ / iOS 14+',
+      current: 'Checking...',
+      status: 'checking',
+      icon: <Smartphone className="w-5 h-5" />
+    },
+    {
+      name: 'Processor (CPU)',
+      minRequired: 'Quad-core 1.4 GHz',
+      recommended: 'Octa-core 2.0 GHz+',
+      current: 'Checking...',
+      status: 'checking',
+      icon: <Cpu className="w-5 h-5" />
+    },
+    {
+      name: 'RAM Memory',
+      minRequired: '2 GB',
+      recommended: '4 GB+',
+      current: 'Checking...',
+      status: 'checking',
+      icon: <MemoryStick className="w-5 h-5" />
+    },
+    {
+      name: 'Storage Space',
+      minRequired: '4 GB free',
+      recommended: '8 GB+ free',
+      current: 'Checking...',
+      status: 'checking',
+      icon: <HardDrive className="w-5 h-5" />
+    },
+    {
+      name: 'Internet Connection',
+      minRequired: '3G / 4G',
+      recommended: '4G / 5G / WiFi',
+      current: 'Checking...',
+      status: 'checking',
+      icon: <Wifi className="w-5 h-5" />
+    },
+    {
+      name: 'Screen Resolution',
+      minRequired: '720 x 1280',
+      recommended: '1080 x 1920+',
+      current: 'Checking...',
+      status: 'checking',
+      icon: <Gamepad2 className="w-5 h-5" />
+    }
+  ]);
+
+  const [overallScore, setOverallScore] = useState<number>(0);
+  const [recommendation, setRecommendation] = useState<string>('');
+  const [isChecking, setIsChecking] = useState<boolean>(false);
+  const [batteryInfo, setBatteryInfo] = useState<any>(null);
+
+  useEffect(() => {
+    collectDeviceInfo();
+    checkBatteryStatus();
+  }, []);
+
+  const collectDeviceInfo = async () => {
+    setIsChecking(true);
+    
+    // Basic device information
+    const info: DeviceInfo = {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      language: navigator.language,
+      cookiesEnabled: navigator.cookieEnabled,
+      doNotTrack: navigator.doNotTrack,
+      hardwareConcurrency: navigator.hardwareConcurrency || 0,
+      deviceMemory: (navigator as any).deviceMemory || 0,
+      maxTouchPoints: navigator.maxTouchPoints || 0,
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      colorDepth: window.screen.colorDepth,
+      pixelDepth: window.screen.pixelDepth
+    };
+
+    // Network information if available
+    if ('connection' in navigator) {
+      const connection = (navigator as any).connection;
+      if (connection) {
+        info.connectionType = connection.effectiveType;
+        info.downlink = connection.downlink;
+        info.rtt = connection.rtt;
+        info.saveData = connection.saveData;
+      }
+    }
+
+    setDeviceInfo(info);
+    analyzeSystem(info);
+  };
+
+  const checkBatteryStatus = async () => {
+    if ('getBattery' in navigator) {
+      try {
+        const battery = await (navigator as any).getBattery();
+        setBatteryInfo({
+          level: battery.level * 100,
+          charging: battery.charging,
+          chargingTime: battery.chargingTime,
+          dischargingTime: battery.dischargingTime
+        });
+
+        battery.addEventListener('levelchange', () => {
+          setBatteryInfo(prev => ({ ...prev, level: battery.level * 100 }));
+        });
+      } catch (error) {
+        console.log('Battery API not available');
+      }
+    }
+  };
+
+  const analyzeSystem = (info: DeviceInfo) => {
+    const updatedRequirements = [...requirements];
+
+    // Analyze OS
+    const os = getOSInfo(info.userAgent);
+    updatedRequirements[0].current = os.name;
+    updatedRequirements[0].status = checkOS(os);
+
+    // Analyze CPU
+    const cpuCores = info.hardwareConcurrency;
+    updatedRequirements[1].current = `${cpuCores} cores`;
+    updatedRequirements[1].status = checkCPU(cpuCores);
+
+    // Analyze RAM
+    const ramGB = info.deviceMemory;
+    updatedRequirements[2].current = ramGB ? `${ramGB} GB` : 'Unknown';
+    updatedRequirements[2].status = checkRAM(ramGB);
+
+    // Analyze Storage (estimated based on platform)
+    const storageGB = estimateStorage();
+    updatedRequirements[3].current = `${storageGB} GB (estimated)`;
+    updatedRequirements[3].status = checkStorage(storageGB);
+
+    // Analyze Internet Connection
+    const connectionInfo = {
+      type: info.connectionType || 'Unknown',
+      downlink: info.downlink || 0
+    };
+    updatedRequirements[4].current = `${connectionInfo.type} (${connectionInfo.downlink} Mbps)`;
+    updatedRequirements[4].status = checkConnection(connectionInfo);
+
+    // Analyze Screen Resolution
+    const resolution = `${info.screenWidth} x ${info.screenHeight}`;
+    updatedRequirements[5].current = resolution;
+    updatedRequirements[5].status = checkResolution(info.screenWidth, info.screenHeight);
+
+    setRequirements(updatedRequirements);
+    calculateOverallScore(updatedRequirements);
+    setIsChecking(false);
+  };
+
+  const getOSInfo = (userAgent: string): { name: string; version: string } => {
+    if (/android/i.test(userAgent)) {
+      return { name: 'Android', version: 'Unknown' };
+    } else if (/iPad|iPhone|iPod/.test(userAgent)) {
+      return { name: 'iOS', version: 'Unknown' };
+    } else if (/Windows/.test(userAgent)) {
+      return { name: 'Windows', version: 'Unknown' };
+    } else if (/Mac/.test(userAgent)) {
+      return { name: 'macOS', version: 'Unknown' };
+    } else {
+      return { name: 'Unknown OS', version: 'Unknown' };
+    }
+  };
+
+  const checkOS = (os: { name: string; version: string }): 'passed' | 'warning' | 'failed' => {
+    if (os.name === 'Android' || os.name === 'iOS') {
+      return 'passed';
+    } else if (os.name === 'Windows' || os.name === 'macOS') {
+      return 'warning';
+    }
+    return 'failed';
+  };
+
+  const checkCPU = (cores: number): 'passed' | 'warning' | 'failed' => {
+    if (cores >= 8) return 'passed';
+    if (cores >= 4) return 'warning';
+    return 'failed';
+  };
+
+  const checkRAM = (ram: number): 'passed' | 'warning' | 'failed' => {
+    if (ram >= 4) return 'passed';
+    if (ram >= 2) return 'warning';
+    return 'failed';
+  };
+
+  const estimateStorage = (): number => {
+    // This is an estimate - in real implementation, you might want to use more accurate methods
+    return 32; // Default estimate
+  };
+
+  const checkStorage = (storage: number): 'passed' | 'warning' | 'failed' => {
+    if (storage >= 8) return 'passed';
+    if (storage >= 4) return 'warning';
+    return 'failed';
+  };
+
+  const checkConnection = (connection: { type: string; downlink: number }): 'passed' | 'warning' | 'failed' => {
+    if (connection.downlink >= 5) return 'passed';
+    if (connection.downlink >= 1) return 'warning';
+    return 'failed';
+  };
+
+  const checkResolution = (width: number, height: number): 'passed' | 'warning' | 'failed' => {
+    const pixels = width * height;
+    if (pixels >= 2073600) return 'passed'; // 1080x1920
+    if (pixels >= 921600) return 'warning'; // 720x1280
+    return 'failed';
+  };
+
+  const calculateOverallScore = (reqs: SystemRequirement[]) => {
+    const scores = reqs.map(req => {
+      switch (req.status) {
+        case 'passed': return 100;
+        case 'warning': return 50;
+        case 'failed': return 0;
+        default: return 0;
+      }
+    });
+    
+    const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+    setOverallScore(Math.round(average));
+
+    if (average >= 80) {
+      setRecommendation('Your system is perfect for Free Fire! Enjoy gaming! 🎮');
+    } else if (average >= 50) {
+      setRecommendation('Your system meets minimum requirements but might experience some lag.');
+    } else {
+      setRecommendation('Your system may not run Free Fire smoothly. Consider upgrading.');
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'passed':
+        return <CheckCircle className="w-5 h-5 text-green-500" />;
+      case 'warning':
+        return <AlertCircle className="w-5 h-5 text-yellow-500" />;
+      case 'failed':
+        return <XCircle className="w-5 h-5 text-red-500" />;
+      default:
+        return <RefreshCw className="w-5 h-5 text-gray-500 animate-spin" />;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'passed': return 'bg-green-100 border-green-500';
+      case 'warning': return 'bg-yellow-100 border-yellow-500';
+      case 'failed': return 'bg-red-100 border-red-500';
+      default: return 'bg-gray-100 border-gray-500';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-orange-400 to-red-600 p-6">
+      <div className="max-w-4xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-t-2xl p-6 shadow-xl">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">Free Fire System Check</h1>
+              <p className="text-gray-600 mt-2">Verify if your device can run Free Fire smoothly</p>
+            </div>
+            <img 
+              src="https://via.placeholder.com/80x80?text=FF" 
+              alt="Free Fire Logo"
+              className="w-20 h-20 rounded-lg"
+            />
+          </div>
+        </div>
+
+        {/* Overall Score */}
+        <div className="bg-white px-6 py-4 border-t border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className={`w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold
+                ${overallScore >= 80 ? 'bg-green-500' : overallScore >= 50 ? 'bg-yellow-500' : 'bg-red-500'} text-white`}>
+                {overallScore}%
+              </div>
+              <div>
+                <p className="text-lg font-semibold text-gray-800">Overall Compatibility</p>
+                <p className="text-gray-600">{recommendation}</p>
+              </div>
+            </div>
+            <button
+              onClick={collectDeviceInfo}
+              disabled={isChecking}
+              className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition disabled:opacity-50 flex items-center space-x-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${isChecking ? 'animate-spin' : ''}`} />
+              <span>Recheck System</span>
+            </button>
+          </div>
+        </div>
+
+        {/* System Requirements */}
+        <div className="bg-white rounded-b-2xl p-6 shadow-xl">
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">System Requirements Check</h2>
+          
+          <div className="space-y-4">
+            {requirements.map((req, index) => (
+              <div
+                key={index}
+                className={`border-2 rounded-lg p-4 transition-all ${getStatusColor(req.status)}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="text-gray-700">{req.icon}</div>
+                    <div>
+                      <h3 className="font-semibold text-gray-800">{req.name}</h3>
+                      <div className="text-sm text-gray-600 mt-1">
+                        <span className="font-medium">Current:</span> {req.current}
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-6">
+                    <div className="text-right">
+                      <div className="text-sm">
+                        <span className="font-medium text-gray-600">Min:</span> {req.minRequired}
+                      </div>
+                      <div className="text-sm">
+                        <span className="font-medium text-gray-600">Rec:</span> {req.recommended}
+                      </div>
+                    </div>
+                    {getStatusIcon(req.status)}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Additional Device Info */}
+          {deviceInfo && (
+            <div className="mt-8 p-4 bg-gray-50 rounded-lg">
+              <h3 className="font-semibold text-gray-800 mb-3">Additional Device Information</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-600">Platform:</span>
+                  <span className="ml-2 font-medium">{deviceInfo.platform}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Touch Points:</span>
+                  <span className="ml-2 font-medium">{deviceInfo.maxTouchPoints}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Color Depth:</span>
+                  <span className="ml-2 font-medium">{deviceInfo.colorDepth}-bit</span>
+                </div>
+                {batteryInfo && (
+                  <>
+                    <div className="flex items-center">
+                      <Battery className="w-4 h-4 mr-1 text-gray-600" />
+                      <span className="text-gray-600">Battery:</span>
+                      <span className="ml-2 font-medium">{batteryInfo.level}%</span>
+                      {batteryInfo.charging && (
+                        <span className="ml-2 text-xs text-green-600">(Charging)</span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Game Tips */}
+          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+            <h3 className="font-semibold text-blue-800 mb-2">💡 Tips for Better Gaming Experience</h3>
+            <ul className="list-disc list-inside text-sm text-blue-700 space-y-1">
+              <li>Close background apps to free up RAM</li>
+              <li>Use a stable WiFi connection for multiplayer</li>
+              <li>Keep your device charged above 20%</li>
+              <li>Update your graphics drivers regularly</li>
+              <li>Clear cache and temporary files for better performance</li>
+            </ul>
+          </div>
+
+          {/* Disclaimer */}
+          <p className="text-xs text-gray-500 mt-6 text-center">
+            * This is an estimation based on browser information. Actual performance may vary.
+            Free Fire is a trademark of Garena International. This tool is for informational purposes only.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default FreeFireSystemCheck;
